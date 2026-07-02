@@ -647,6 +647,39 @@ const plugin: Plugin = async ({ client, directory }) => {
     return state;
   }
 
+  async function getContinueAgent(sessionID: string): Promise<string | null> {
+    try {
+      const response = await client.session.messages({
+        path: { id: sessionID },
+        query: { limit: 10 },
+      });
+      const messages = response.data ?? [];
+
+      // 1. Last user message's agent (what user requested)
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i]?.info;
+        if (msg?.role === "user") {
+          const um = msg as { agent?: string };
+          if (um.agent) return um.agent;
+        }
+      }
+
+      // 2. Last assistant message's mode (what was executing)
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const msg = messages[i]?.info;
+        if (msg?.role === "assistant") {
+          const am = msg as { mode?: string; agent?: string };
+          if (am.mode) return am.mode;
+          if (am.agent) return am.agent;
+        }
+      }
+    } catch (err) {
+      log(`Failed to get agent for ${sessionID}: ${err}`);
+    }
+    // 3. No fallback - return null to skip continue
+    return null;
+  }
+
   async function sendContinue(sessionID: string) {
     const state = sessions.get(sessionID);
     if (!state?.pendingContinue) return;
@@ -666,21 +699,29 @@ const plugin: Plugin = async ({ client, directory }) => {
       return;
     }
 
+    const agent = await getContinueAgent(sessionID);
+    if (!agent) {
+      log(`No agent mode found for ${sessionID}, skipping continue`);
+      state.pendingContinue = false;
+      return;
+    }
+
     state.lastContinueTime = now;
     state.consecutiveCount++;
     state.pendingContinue = false;
 
     const maxLabel = config.maxConsecutive > 0 ? `${config.maxConsecutive}` : "∞";
-    log(`Sending "continue" to ${sessionID} (attempt ${state.consecutiveCount}/${maxLabel})`);
+    log(`Sending "continue" to ${sessionID} (attempt ${state.consecutiveCount}/${maxLabel}) with agent="${agent}"`);
 
     try {
       await client.session.promptAsync({
         path: { id: sessionID },
         body: {
           parts: [{ type: "text" as const, text: "continue" }],
+          agent,
         },
       });
-      log(`Successfully sent "continue" to ${sessionID}`);
+      log(`Successfully sent "continue" to ${sessionID} with agent="${agent}"`);
     } catch (err) {
       log(`Failed to send "continue" to ${sessionID}: ${err}`);
     }
