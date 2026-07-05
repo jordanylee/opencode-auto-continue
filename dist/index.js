@@ -3,6 +3,13 @@ import { join } from "node:path";
 const PLUGIN_NAME = "opencode-auto-continue";
 const CONFIG_DIR = ".opencode";
 const CONFIG_FILE = `${PLUGIN_NAME}.jsonc`;
+function getGlobalConfigPath() {
+    const { config } = getOpencodeDirs();
+    return join(config, CONFIG_FILE);
+}
+function getProjectConfigPath(directory) {
+    return join(directory, CONFIG_DIR, CONFIG_FILE);
+}
 const GITHUB_REPO = "developing-today/opencode-auto-continue";
 const GITHUB_API_COMMITS = `https://api.github.com/repos/${GITHUB_REPO}/commits/main`;
 const GITHUB_API_RELEASE = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/latest`;
@@ -273,42 +280,113 @@ function parseJsonc(text) {
     return JSON.parse(result);
 }
 async function loadConfig(directory, log) {
-    const configPath = join(directory, CONFIG_DIR, CONFIG_FILE);
+    // Load global config first
+    const globalConfigPath = getGlobalConfigPath();
+    let globalConfig = { ...DEFAULTS };
     try {
-        const raw = await readFile(configPath, "utf-8");
+        const raw = await readFile(globalConfigPath, "utf-8");
         const parsed = parseJsonc(raw);
-        const config = { ...DEFAULTS };
         if (typeof parsed.throttleMs === "number")
-            config.throttleMs = parsed.throttleMs;
+            globalConfig.throttleMs = parsed.throttleMs;
         if (typeof parsed.delayMs === "number")
-            config.delayMs = parsed.delayMs;
+            globalConfig.delayMs = parsed.delayMs;
         if (typeof parsed.maxConsecutive === "number")
-            config.maxConsecutive = parsed.maxConsecutive;
+            globalConfig.maxConsecutive = parsed.maxConsecutive;
         if (typeof parsed.enabled === "boolean")
-            config.enabled = parsed.enabled;
+            globalConfig.enabled = parsed.enabled;
         if (typeof parsed.updateThrottleMs === "number")
-            config.updateThrottleMs = parsed.updateThrottleMs;
+            globalConfig.updateThrottleMs = parsed.updateThrottleMs;
         if (typeof parsed.offlineMode === "boolean")
-            config.offlineMode = parsed.offlineMode;
+            globalConfig.offlineMode = parsed.offlineMode;
         if (Array.isArray(parsed.errorPatterns)) {
-            config.errorPatterns = parsed.errorPatterns.filter((p) => typeof p === "string");
+            globalConfig.errorPatterns = parsed.errorPatterns.filter((p) => typeof p === "string");
         }
         if (Array.isArray(parsed.excludePatterns)) {
-            config.excludePatterns = parsed.excludePatterns.filter((p) => typeof p === "string");
+            globalConfig.excludePatterns = parsed.excludePatterns.filter((p) => typeof p === "string");
         }
-        log(`Loaded config from ${configPath}: ${JSON.stringify(config)}`);
-        return config;
+        log(`Loaded global config from ${globalConfigPath}`);
     }
     catch (err) {
         const code = err?.code;
         if (code === "ENOENT") {
-            log(`No config file at ${configPath}, using defaults`);
+            log(`No global config file at ${globalConfigPath}, using defaults`);
         }
         else {
-            log(`Error reading config from ${configPath}: ${err} — using defaults`);
+            log(`Error reading global config from ${globalConfigPath}: ${err} — using defaults`);
         }
-        return { ...DEFAULTS };
     }
+    // Load project config and merge on top of global (project takes priority)
+    const projectConfigPath = getProjectConfigPath(directory);
+    let projectConfig = {};
+    try {
+        const raw = await readFile(projectConfigPath, "utf-8");
+        const parsed = parseJsonc(raw);
+        if (typeof parsed.throttleMs === "number")
+            projectConfig.throttleMs = parsed.throttleMs;
+        if (typeof parsed.delayMs === "number")
+            projectConfig.delayMs = parsed.delayMs;
+        if (typeof parsed.maxConsecutive === "number")
+            projectConfig.maxConsecutive = parsed.maxConsecutive;
+        if (typeof parsed.enabled === "boolean")
+            projectConfig.enabled = parsed.enabled;
+        if (typeof parsed.updateThrottleMs === "number")
+            projectConfig.updateThrottleMs = parsed.updateThrottleMs;
+        if (typeof parsed.offlineMode === "boolean")
+            projectConfig.offlineMode = parsed.offlineMode;
+        if (Array.isArray(parsed.errorPatterns)) {
+            projectConfig.errorPatterns = parsed.errorPatterns.filter((p) => typeof p === "string");
+        }
+        if (Array.isArray(parsed.excludePatterns)) {
+            projectConfig.excludePatterns = parsed.excludePatterns.filter((p) => typeof p === "string");
+        }
+        log(`Loaded project config from ${projectConfigPath}`);
+    }
+    catch (err) {
+        const code = err?.code;
+        if (code !== "ENOENT") {
+            log(`Error reading project config from ${projectConfigPath}: ${err}`);
+        }
+    }
+    const config = { ...globalConfig, ...projectConfig };
+    log(`Effective config: ${JSON.stringify(config)}`);
+    return config;
+}
+async function loadConfigGlobal(log) {
+    const globalConfigPath = getGlobalConfigPath();
+    let globalConfig = { ...DEFAULTS };
+    try {
+        const raw = await readFile(globalConfigPath, "utf-8");
+        const parsed = parseJsonc(raw);
+        if (typeof parsed.throttleMs === "number")
+            globalConfig.throttleMs = parsed.throttleMs;
+        if (typeof parsed.delayMs === "number")
+            globalConfig.delayMs = parsed.delayMs;
+        if (typeof parsed.maxConsecutive === "number")
+            globalConfig.maxConsecutive = parsed.maxConsecutive;
+        if (typeof parsed.enabled === "boolean")
+            globalConfig.enabled = parsed.enabled;
+        if (typeof parsed.updateThrottleMs === "number")
+            globalConfig.updateThrottleMs = parsed.updateThrottleMs;
+        if (typeof parsed.offlineMode === "boolean")
+            globalConfig.offlineMode = parsed.offlineMode;
+        if (Array.isArray(parsed.errorPatterns)) {
+            globalConfig.errorPatterns = parsed.errorPatterns.filter((p) => typeof p === "string");
+        }
+        if (Array.isArray(parsed.excludePatterns)) {
+            globalConfig.excludePatterns = parsed.excludePatterns.filter((p) => typeof p === "string");
+        }
+        log(`Loaded global config from ${globalConfigPath}`);
+    }
+    catch (err) {
+        const code = err?.code;
+        if (code === "ENOENT") {
+            log(`No global config file at ${globalConfigPath}, using defaults`);
+        }
+        else {
+            log(`Error reading global config from ${globalConfigPath}: ${err} — using defaults`);
+        }
+    }
+    return globalConfig;
 }
 function isRetryableError(error, config) {
     if (!error || typeof error !== "object")
@@ -585,7 +663,7 @@ const plugin = async ({ client, directory }) => {
     }
     // Write current globalConfig to disk
     async function writeGlobalConfig() {
-        const configPath = join(directory, CONFIG_DIR, CONFIG_FILE);
+        const configPath = getGlobalConfigPath();
         // Omit pattern arrays from disk if they're still the defaults
         const toWrite = {
             throttleMs: globalConfig.throttleMs,
@@ -620,6 +698,40 @@ const plugin = async ({ client, directory }) => {
         }
         return state;
     }
+    async function getContinueAgent(sessionID) {
+        try {
+            const response = await client.session.messages({
+                path: { id: sessionID },
+                query: { limit: 10 },
+            });
+            const messages = response.data ?? [];
+            // 1. Last user message's agent (what user requested)
+            for (let i = messages.length - 1; i >= 0; i--) {
+                const msg = messages[i]?.info;
+                if (msg?.role === "user") {
+                    const um = msg;
+                    if (um.agent)
+                        return um.agent;
+                }
+            }
+            // 2. Last assistant message's mode (what was executing)
+            for (let i = messages.length - 1; i >= 0; i--) {
+                const msg = messages[i]?.info;
+                if (msg?.role === "assistant") {
+                    const am = msg;
+                    if (am.mode)
+                        return am.mode;
+                    if (am.agent)
+                        return am.agent;
+                }
+            }
+        }
+        catch (err) {
+            log(`Failed to get agent for ${sessionID}: ${err}`);
+        }
+        // 3. No fallback - return null to skip continue
+        return null;
+    }
     async function sendContinue(sessionID) {
         const state = sessions.get(sessionID);
         if (!state?.pendingContinue)
@@ -636,19 +748,26 @@ const plugin = async ({ client, directory }) => {
             state.pendingContinue = false;
             return;
         }
+        const agent = await getContinueAgent(sessionID);
+        if (!agent) {
+            log(`No agent mode found for ${sessionID}, skipping continue`);
+            state.pendingContinue = false;
+            return;
+        }
         state.lastContinueTime = now;
         state.consecutiveCount++;
         state.pendingContinue = false;
         const maxLabel = config.maxConsecutive > 0 ? `${config.maxConsecutive}` : "∞";
-        log(`Sending "continue" to ${sessionID} (attempt ${state.consecutiveCount}/${maxLabel})`);
+        log(`Sending "continue" to ${sessionID} (attempt ${state.consecutiveCount}/${maxLabel}) with agent="${agent}"`);
         try {
             await client.session.promptAsync({
                 path: { id: sessionID },
                 body: {
                     parts: [{ type: "text", text: "continue" }],
+                    agent,
                 },
             });
-            log(`Successfully sent "continue" to ${sessionID}`);
+            log(`Successfully sent "continue" to ${sessionID} with agent="${agent}"`);
         }
         catch (err) {
             log(`Failed to send "continue" to ${sessionID}: ${err}`);
@@ -833,7 +952,7 @@ const plugin = async ({ client, directory }) => {
         }
         // ── Reload (re-read global config from disk) ──
         if (subcmd === "reload") {
-            const configPath = join(directory, CONFIG_DIR, CONFIG_FILE);
+            const configPath = getGlobalConfigPath();
             let fileExists = false;
             let rawContents = "";
             try {
@@ -843,7 +962,7 @@ const plugin = async ({ client, directory }) => {
             catch {
                 // File doesn't exist
             }
-            const reloaded = await loadConfig(directory, log);
+            const reloaded = await loadConfigGlobal(log);
             Object.assign(globalConfig, reloaded);
             const lines = [];
             if (fileExists) {

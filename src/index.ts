@@ -5,6 +5,15 @@ import type { Plugin } from "@opencode-ai/plugin";
 const PLUGIN_NAME = "opencode-auto-continue";
 const CONFIG_DIR = ".opencode";
 const CONFIG_FILE = `${PLUGIN_NAME}.jsonc`;
+
+function getGlobalConfigPath(): string {
+  const { config } = getOpencodeDirs();
+  return join(config, CONFIG_FILE);
+}
+
+function getProjectConfigPath(directory: string): string {
+  return join(directory, CONFIG_DIR, CONFIG_FILE);
+}
 const GITHUB_REPO = "developing-today/opencode-auto-continue";
 const GITHUB_API_COMMITS = `https://api.github.com/repos/${GITHUB_REPO}/commits/main`;
 const GITHUB_API_RELEASE = `https://api.github.com/repos/${GITHUB_REPO}/releases/tags/latest`;
@@ -304,36 +313,93 @@ function parseJsonc(text: string): unknown {
 }
 
 async function loadConfig(directory: string, log: (msg: string) => void): Promise<Config> {
-  const configPath = join(directory, CONFIG_DIR, CONFIG_FILE);
+  // Load global config first
+  const globalConfigPath = getGlobalConfigPath();
+  let globalConfig: Config = { ...DEFAULTS };
   try {
-    const raw = await readFile(configPath, "utf-8");
+    const raw = await readFile(globalConfigPath, "utf-8");
     const parsed = parseJsonc(raw) as Record<string, unknown>;
-    const config: Config = { ...DEFAULTS };
-
-    if (typeof parsed.throttleMs === "number") config.throttleMs = parsed.throttleMs;
-    if (typeof parsed.delayMs === "number") config.delayMs = parsed.delayMs;
-    if (typeof parsed.maxConsecutive === "number") config.maxConsecutive = parsed.maxConsecutive;
-    if (typeof parsed.enabled === "boolean") config.enabled = parsed.enabled;
-    if (typeof parsed.updateThrottleMs === "number") config.updateThrottleMs = parsed.updateThrottleMs;
-    if (typeof parsed.offlineMode === "boolean") config.offlineMode = parsed.offlineMode;
+    if (typeof parsed.throttleMs === "number") globalConfig.throttleMs = parsed.throttleMs;
+    if (typeof parsed.delayMs === "number") globalConfig.delayMs = parsed.delayMs;
+    if (typeof parsed.maxConsecutive === "number") globalConfig.maxConsecutive = parsed.maxConsecutive;
+    if (typeof parsed.enabled === "boolean") globalConfig.enabled = parsed.enabled;
+    if (typeof parsed.updateThrottleMs === "number") globalConfig.updateThrottleMs = parsed.updateThrottleMs;
+    if (typeof parsed.offlineMode === "boolean") globalConfig.offlineMode = parsed.offlineMode;
     if (Array.isArray(parsed.errorPatterns)) {
-      config.errorPatterns = parsed.errorPatterns.filter((p): p is string => typeof p === "string");
+      globalConfig.errorPatterns = parsed.errorPatterns.filter((p): p is string => typeof p === "string");
     }
     if (Array.isArray(parsed.excludePatterns)) {
-      config.excludePatterns = parsed.excludePatterns.filter((p): p is string => typeof p === "string");
+      globalConfig.excludePatterns = parsed.excludePatterns.filter((p): p is string => typeof p === "string");
     }
-
-    log(`Loaded config from ${configPath}: ${JSON.stringify(config)}`);
-    return config;
+    log(`Loaded global config from ${globalConfigPath}`);
   } catch (err: unknown) {
     const code = (err as NodeJS.ErrnoException)?.code;
     if (code === "ENOENT") {
-      log(`No config file at ${configPath}, using defaults`);
+      log(`No global config file at ${globalConfigPath}, using defaults`);
     } else {
-      log(`Error reading config from ${configPath}: ${err} — using defaults`);
+      log(`Error reading global config from ${globalConfigPath}: ${err} — using defaults`);
     }
-    return { ...DEFAULTS };
   }
+
+  // Load project config and merge on top of global (project takes priority)
+  const projectConfigPath = getProjectConfigPath(directory);
+  let projectConfig: Partial<Config> = {};
+  try {
+    const raw = await readFile(projectConfigPath, "utf-8");
+    const parsed = parseJsonc(raw) as Record<string, unknown>;
+    if (typeof parsed.throttleMs === "number") projectConfig.throttleMs = parsed.throttleMs;
+    if (typeof parsed.delayMs === "number") projectConfig.delayMs = parsed.delayMs;
+    if (typeof parsed.maxConsecutive === "number") projectConfig.maxConsecutive = parsed.maxConsecutive;
+    if (typeof parsed.enabled === "boolean") projectConfig.enabled = parsed.enabled;
+    if (typeof parsed.updateThrottleMs === "number") projectConfig.updateThrottleMs = parsed.updateThrottleMs;
+    if (typeof parsed.offlineMode === "boolean") projectConfig.offlineMode = parsed.offlineMode;
+    if (Array.isArray(parsed.errorPatterns)) {
+      projectConfig.errorPatterns = parsed.errorPatterns.filter((p): p is string => typeof p === "string");
+    }
+    if (Array.isArray(parsed.excludePatterns)) {
+      projectConfig.excludePatterns = parsed.excludePatterns.filter((p): p is string => typeof p === "string");
+    }
+    log(`Loaded project config from ${projectConfigPath}`);
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code !== "ENOENT") {
+      log(`Error reading project config from ${projectConfigPath}: ${err}`);
+    }
+  }
+
+  const config = { ...globalConfig, ...projectConfig };
+  log(`Effective config: ${JSON.stringify(config)}`);
+  return config;
+}
+
+async function loadConfigGlobal(log: (msg: string) => void): Promise<Config> {
+  const globalConfigPath = getGlobalConfigPath();
+  let globalConfig: Config = { ...DEFAULTS };
+  try {
+    const raw = await readFile(globalConfigPath, "utf-8");
+    const parsed = parseJsonc(raw) as Record<string, unknown>;
+    if (typeof parsed.throttleMs === "number") globalConfig.throttleMs = parsed.throttleMs;
+    if (typeof parsed.delayMs === "number") globalConfig.delayMs = parsed.delayMs;
+    if (typeof parsed.maxConsecutive === "number") globalConfig.maxConsecutive = parsed.maxConsecutive;
+    if (typeof parsed.enabled === "boolean") globalConfig.enabled = parsed.enabled;
+    if (typeof parsed.updateThrottleMs === "number") globalConfig.updateThrottleMs = parsed.updateThrottleMs;
+    if (typeof parsed.offlineMode === "boolean") globalConfig.offlineMode = parsed.offlineMode;
+    if (Array.isArray(parsed.errorPatterns)) {
+      globalConfig.errorPatterns = parsed.errorPatterns.filter((p): p is string => typeof p === "string");
+    }
+    if (Array.isArray(parsed.excludePatterns)) {
+      globalConfig.excludePatterns = parsed.excludePatterns.filter((p): p is string => typeof p === "string");
+    }
+    log(`Loaded global config from ${globalConfigPath}`);
+  } catch (err: unknown) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    if (code === "ENOENT") {
+      log(`No global config file at ${globalConfigPath}, using defaults`);
+    } else {
+      log(`Error reading global config from ${globalConfigPath}: ${err} — using defaults`);
+    }
+  }
+  return globalConfig;
 }
 
 function isRetryableError(error: unknown, config: Config): boolean {
@@ -610,7 +676,7 @@ const plugin: Plugin = async ({ client, directory }) => {
 
   // Write current globalConfig to disk
   async function writeGlobalConfig() {
-    const configPath = join(directory, CONFIG_DIR, CONFIG_FILE);
+    const configPath = getGlobalConfigPath();
     // Omit pattern arrays from disk if they're still the defaults
     const toWrite: Record<string, unknown> = {
       throttleMs: globalConfig.throttleMs,
@@ -957,7 +1023,7 @@ const plugin: Plugin = async ({ client, directory }) => {
 
     // ── Reload (re-read global config from disk) ──
     if (subcmd === "reload") {
-      const configPath = join(directory, CONFIG_DIR, CONFIG_FILE);
+      const configPath = getGlobalConfigPath();
       let fileExists = false;
       let rawContents = "";
       try {
@@ -967,7 +1033,7 @@ const plugin: Plugin = async ({ client, directory }) => {
         // File doesn't exist
       }
 
-      const reloaded = await loadConfig(directory, log);
+      const reloaded = await loadConfigGlobal(log);
       Object.assign(globalConfig, reloaded);
 
       const lines: string[] = [];

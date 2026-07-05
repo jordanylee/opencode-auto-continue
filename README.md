@@ -14,10 +14,22 @@ OpenCode plugin that automatically sends "continue" when transient errors occur,
 
 ## Installation
 
-Add to the `plugin` array in your `opencode.jsonc`:
+Add to the `plugin` array in `~/.config/opencode/opencode.jsonc` for a global installation, or add to the `plugin` array in `<project>/.opencode/opencode.jsonc` for a per-project installation.
 
 ```
+"opencode-auto-continue@https://github.com/jordanylee/opencode-auto-continue/archive/refs/heads/main.tar.gz",
+```
+```
 "opencode-auto-continue@https://github.com/developing-today/opencode-auto-continue/archive/refs/tags/latest.tar.gz",
+```
+
+```jsonc
+{
+  "plugin": [
+    "opencode-auto-continue@https://github.com/jordanylee/opencode-auto-continue/archive/refs/heads/main.tar.gz",
+    // ... other plugins
+  ]
+}
 ```
 
 ```jsonc
@@ -70,7 +82,12 @@ All commands also work with `/ac` (e.g., `/ac status`, `/ac on`, `/ac global upd
 
 A config file is **not required**. The plugin works out of the box with sensible defaults. You only need a config file if you want to change the defaults without using the `/auto-continue global` command.
 
-Create `opencode-auto-continue.jsonc` in your `.opencode/` directory. The following shows the current defaults — you only need to include the settings you want to change:
+The plugin loads config from two locations:
+
+1. **Global**: `~/.config/opencode/opencode-auto-continue.jsonc` — shared across all projects
+2. **Project**: `<project>/.opencode/opencode-auto-continue.jsonc` — overrides global config for this project
+
+The following shows the current defaults — you only need to include the settings you want to change:
 
 ```jsonc
 {
@@ -176,7 +193,9 @@ To override the defaults, add `errorPatterns` and/or `excludePatterns` to your c
 The plugin logs all activity with the `[opencode-auto-continue]` prefix:
 
 ```
-[opencode-auto-continue] No config file at /home/user/.opencode/opencode-auto-continue.jsonc, using defaults
+[opencode-auto-continue] No global config file at /home/user/.config/opencode/opencode-auto-continue.jsonc, using defaults
+[opencode-auto-continue] Loaded project config from /home/user/project/.opencode/opencode-auto-continue.jsonc
+[opencode-auto-continue] Effective config: {"throttleMs":5000,"delayMs":500,"maxConsecutive":5,"enabled":true,"updateThrottleMs":30000,"offlineMode":false,"errorPatterns":[...],"excludePatterns":[...]}
 [opencode-auto-continue] Retryable error in abc123: Multiple reasoning_opaque values received...
 [opencode-auto-continue] abc123 idle with pending continue, waiting 500ms...
 [opencode-auto-continue] Sending "continue" to abc123 (attempt 1/5)
@@ -184,6 +203,13 @@ The plugin logs all activity with the `[opencode-auto-continue]` prefix:
 ```
 
 ## Building from Source
+
+```bash
+git clone https://github.com/jordanylee/opencode-auto-continue.git
+cd opencode-auto-continue
+bun install
+bun run build
+```
 
 ```bash
 git clone https://github.com/developing-today/opencode-auto-continue.git
